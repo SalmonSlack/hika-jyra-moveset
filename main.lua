@@ -11,11 +11,19 @@ local NAME = "Hikaseru"
 local DESC = { "Desc1", "Desc2" }
 local CREDITS = "Credits"
 local COLOR = { r = 93, g = 178, b = 183 }
-local TEXTURE = get_texture_info("hikaseru_icon")
+local TEXTURE = get_texture_info("toonTurtleLife")
+
+HIKA_AIR_JUMP_1 = audio_sample_load('hika_air_jump_1.ogg')
+HIKA_AIR_JUMP_2 = audio_sample_load('hika_air_jump_2.ogg')
 
 BASE_TERMINAL_VELOCITY = -75.0
 HIKA_TERMINAL_VELOCITY = -150.0
 HIKA_GRAVITY_MULT = 1.25
+HIKA_BELLY_FLOP_FORWARD_VEL = 20.0
+HIKA_AIR_JUMP_VEL = 40.0
+HIKA_AIR_JUMP_COUNT = 5
+HIKA_DIVE_JUMP_VEL = 50.0
+HIKA_ROLL_JUMP_VEL = 40.0
 
 local IGNORE_GRAVITY_ACTIONS = {
     ACT_BUBBLED,
@@ -27,16 +35,63 @@ local IGNORE_GRAVITY_ACTIONS = {
     ACT_TWIRLING,
 }
 
+local VALID_AIR_JUMP_ACTIONS = {
+    ACT_FREEFALL,
+    ACT_JUMP,
+    ACT_DOUBLE_JUMP,
+    ACT_TRIPLE_JUMP,
+    ACT_SIDE_FLIP,
+    ACT_BELLY_FLOP,
+}
+
+GRABBABLE_OBJECTS = {
+    id_bhvGoomba,
+    id_bhvKoopa,
+    id_bhvBobomb,
+}
+
 -- Adding Hikaseru to Character Select
 CT_HIKASERU = _G.charSelect.character_add(NAME, DESC, CREDITS, COLOR, E_MODEL_HIKASERU, CT_WARIO, TEXTURE)
 
----Handles the inputs and actions we need to be updating every frame
+---Handles checks that need to occur on every frame
 ---@param m MarioState
 local function mario_update(m)
     if m.playerIndex ~= 0 then return end
 
+    -- When the player is grounded, reset their air jumps to zero
+    if m.action & ACT_FLAG_AIR == 0 then
+        gPlayerSyncTable[0].airJumpCount = 0
+        gPlayerSyncTable[0].bellyBounces = 0
+    end
+
+    -- Handles the air jump action
+    if m.action & ACT_FLAG_AIR and m.vel.y <= 0 and gPlayerSyncTable[0].airJumpCount < HIKA_AIR_JUMP_COUNT and is_value_in_list(m.action, VALID_AIR_JUMP_ACTIONS) then
+        -- If the player has already started air jumping, the player can simply hold the A button to continue air jumping
+        if m.prevAction == ACT_AIR_JUMP and m.action ~= ACT_BELLY_FLOP then
+            -- Letting the player fall a bit more before they can jump again to give a similar air jump effect to Kirby Air Ride
+            if m.vel.y <= (-4 * HIKA_GRAVITY_MULT * 2) and m.controller.buttonDown & A_BUTTON ~= 0 then
+                set_mario_action(m, ACT_AIR_JUMP, 0)
+            end
+        elseif m.controller.buttonPressed & A_BUTTON ~= 0 then
+            -- If the player is belly flopping, only allow a jump out of the belly flop if they aren't falling too fast
+            if m.action ~= ACT_BELLY_FLOP or (m.action == ACT_BELLY_FLOP and m.vel.y > -HIKA_AIR_JUMP_VEL and gPlayerSyncTable[0].bellyBounces > 0) then
+                set_mario_action(m, ACT_AIR_JUMP, 0)
+            end
+        end
+    end
+
+    if m.action == ACT_BELLY_FLOP and m.controller.buttonDown & Z_TRIG ~= 0 and m.vel.y > -HIKA_AIR_JUMP_VEL and gPlayerSyncTable[0].bellyBounces > 0 then
+        set_mario_action(m, ACT_GROUND_POUND, 0)
+    end
+
+    -- Allows the player to roll out of a ground pound
+    if m.action == ACT_GROUND_POUND_LAND and m.controller.buttonDown & Z_TRIG ~= 0 and m.controller.buttonPressed & B_BUTTON ~= 0 then
+        set_mario_action(m, ACT_ROLL, 0)
+    end
+
+    -- Begins the eating action
     if m.heldObj ~= nil and m.controller.buttonDown & Z_TRIG ~= 0 then
-        return ACT_EATING
+        set_mario_action(m, ACT_EATING, 0)
     end
 end
 
@@ -51,6 +106,10 @@ local function before_set_mario_action(m, incomingAction)
     end
 
     if incomingAction == ACT_DIVE then
+        -- If the player is on the ground, perform a small jump leading into the belly flop
+        if m.action & ACT_FLAG_AIR == 0 then
+            m.vel.y = HIKA_DIVE_JUMP_VEL
+        end
         return ACT_BELLY_FLOP
     end
 
@@ -58,8 +117,11 @@ local function before_set_mario_action(m, incomingAction)
         return ACT_ROLL
     end
 
-    if (incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING) and m.controller.buttonDown & Z_TRIG ~= 0 then
-        return ACT_BELLY_THRUST
+    if incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING then
+        if m.controller.buttonDown & Z_TRIG ~= 0 then
+            return ACT_BELLY_THRUST
+        end
+        return ACT_GRAB
     end
 
     if incomingAction == ACT_LONG_JUMP then
@@ -80,8 +142,8 @@ local function before_phys_step(m, stepType)
 
     -- Apply gravity multiplier only if we're falling
     if m.vel.y < 0 then
-        -- Allow the player to slow their fall by holding the A button as long as they're not performing a pounding action
-        if m.action ~= ACT_BELLY_FLOP and m.action ~= ACT_GROUND_POUND and m.controller.buttonDown & A_BUTTON ~= 0 then
+        -- Allow the player to slow their fall by holding the A button as long as they're not performing a pounding action or an air jump
+        if m.action ~= ACT_BELLY_FLOP and m.action ~= ACT_GROUND_POUND and m.action ~= ACT_AIR_JUMP and m.controller.buttonDown & A_BUTTON ~= 0 then
             m.vel.y = math.max(m.vel.y - 2, BASE_TERMINAL_VELOCITY // 2)
         else
             m.vel.y = math.max(m.vel.y - (4 * HIKA_GRAVITY_MULT) + 4, HIKA_TERMINAL_VELOCITY)
@@ -93,4 +155,3 @@ end
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_MARIO_UPDATE, mario_update)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_PHYS_STEP, before_phys_step)
-
