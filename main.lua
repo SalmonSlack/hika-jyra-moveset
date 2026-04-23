@@ -24,6 +24,7 @@ HIKA_AIR_JUMP_VEL = 40.0
 HIKA_AIR_JUMP_COUNT = 5
 HIKA_DIVE_JUMP_VEL = 50.0
 HIKA_ROLL_JUMP_VEL = 40.0
+HIKA_OBJ_THROW_STRENGTH = 60.0
 
 local IGNORE_GRAVITY_ACTIONS = {
     ACT_BUBBLED,
@@ -44,10 +45,26 @@ local VALID_AIR_JUMP_ACTIONS = {
     ACT_BELLY_FLOP,
 }
 
-GRABBABLE_OBJECTS = {
+-- Enemies Hika will pick up instead of punching
+-- Stretch goal is to give each "held enemy" we generate different properties when being held such as gravity, style of impact when it hits someone, etc.
+local GRABBABLE_OBJECTS = {
+    id_bhvBoo,
+    id_bhvBooInCastle,
+    id_bhvCourtyardBooTriplet,
+    id_bhvFlyGuy,
+    id_bhvGhostHuntBoo,
     id_bhvGoomba,
     id_bhvKoopa,
-    id_bhvBobomb,
+    id_bhvMerryGoRoundBoo,
+    id_bhvMontyMole,
+    id_bhvPiranhaPlant,
+    id_bhvScuttlebug,
+    id_bhvSkeeter,
+    id_bhvSmallBully,
+    id_bhvSmallChillBully,
+    id_bhvSnufit,
+    id_bhvSpindrift,
+    id_bhvSwoop,
 }
 
 -- Adding Hikaseru to Character Select
@@ -80,6 +97,7 @@ local function mario_update(m)
         end
     end
 
+    -- Allows the player to ground pound out of a belly flop
     if m.action == ACT_BELLY_FLOP and m.controller.buttonDown & Z_TRIG ~= 0 and m.vel.y > -HIKA_AIR_JUMP_VEL and gPlayerSyncTable[0].bellyBounces > 0 then
         set_mario_action(m, ACT_GROUND_POUND, 0)
     end
@@ -117,11 +135,8 @@ local function before_set_mario_action(m, incomingAction)
         return ACT_ROLL
     end
 
-    if incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING then
-        if m.controller.buttonDown & Z_TRIG ~= 0 then
-            return ACT_BELLY_THRUST
-        end
-        return ACT_GRAB
+    if (incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING) and m.controller.buttonDown & Z_TRIG ~= 0 then
+        return ACT_BELLY_THRUST
     end
 
     if incomingAction == ACT_LONG_JUMP then
@@ -151,7 +166,37 @@ local function before_phys_step(m, stepType)
     end
 end
 
+---Handles the grab action on enemies
+---@param m MarioState
+---@param victim Object
+local function on_attack_object(m, victim)
+    if m.playerIndex ~= 0 or not is_value_in_list(get_id_from_behavior(victim.behavior), GRABBABLE_OBJECTS) then return end
+
+    -- If the attack isn't a punch, we don't need to do any special actions
+    if m.action ~= ACT_PUNCHING and m.action ~= ACT_MOVE_PUNCHING then
+        return
+    end
+
+    -- Zero out velocity to keep the player from sliding
+    m.slideVelX = 0
+    m.slideVelZ = 0
+    m.forwardVel = 0
+
+    local modelId = obj_get_model_id_extended(victim)
+    local heldObj = spawn_sync_object(id_bhvHeldObj, modelId, m.pos.x, m.pos.y, m.pos.z, function(o)
+        o.header.gfx.scale.x = victim.header.gfx.scale.x
+        o.header.gfx.scale.y = victim.header.gfx.scale.y
+        o.header.gfx.scale.z = victim.header.gfx.scale.z
+    end)
+
+    m.heldObj = heldObj
+    obj_mark_for_deletion(victim)
+    set_mario_action(m, ACT_HOLD_IDLE, 0)
+end
+
 -- Event Hooks
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_MARIO_UPDATE, mario_update)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_PHYS_STEP, before_phys_step)
+
+hook_event(HOOK_ON_ATTACK_OBJECT, on_attack_object)

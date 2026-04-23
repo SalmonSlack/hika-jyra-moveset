@@ -35,15 +35,3 @@ function play_hika_air_jump_sound(m)
     audio_sample_stop(sample)
     audio_sample_play(sample, m.pos, vol)
 end
-
----Gets the first grabbable object that makes contact with the player
----@param m MarioState
----@param objList integer[] List of objects to check against
-function get_first_overlapping_object(m, objList)
-    for _, bhvId in ipairs(objList) do
-        local obj = obj_get_nearest_object_with_behavior_id(m.marioObj, bhvId)
-        if obj ~= nil and obj_check_hitbox_overlap(m.marioObj, obj) then
-            return obj
-        end
-    end
-end

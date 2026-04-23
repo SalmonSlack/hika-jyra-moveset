@@ -7,7 +7,6 @@ ACT_FLAG_ALLOW_VERTICAL_WIND_ACTION)
 ACT_BELLY_THRUST = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY | ACT_FLAG_ATTACKING)
 ACT_BELLY_LONG_JUMP = allocate_mario_action(ACT_GROUP_MOVING | ACT_FLAG_MOVING | ACT_GROUP_AIRBORNE | ACT_FLAG_AIR | ACT_FLAG_ATTACKING) -- Might not need the attacking flag?
 ACT_AIR_JUMP = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR)
-ACT_GRAB = allocate_mario_action(ACT_FLAG_ATTACKING)
 ACT_EATING = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY)
 ACT_EATEN = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_INTANGIBLE)
 ACT_HELD = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_INTANGIBLE)
@@ -268,51 +267,6 @@ local function roll_gravity(m)
     end
 end
 
----Handles the logic that checks for an object to grab
----@param m MarioState
----@return integer | nil
-local function grab_loop(m)
-    if m.playerIndex ~= 0 then return end
-
-    perform_ground_step(m)
-
-    if m.actionTimer == 0 then
-        set_mario_animation(m, CHAR_ANIM_FIRST_PUNCH)
-    end
-
-    -- Get the closest object that can be grabbed
-    local obj = get_first_overlapping_object(m, GRABBABLE_OBJECTS)
-
-    -- If we detect a grabbable object, we're going to delete it and replace it with a 'grabbed' copy of itself
-    if obj ~= nil then
-        log_to_console("Grabbed Object: " .. tostring(get_id_from_behavior(obj.behavior)))
-        local modelId = obj_get_model_id_extended(obj)
-        log_to_console("Grabbed Object Model: " .. tostring(modelId))
-        local heldObj = spawn_sync_object(id_bhvHeldObj, modelId, m.pos.x, m.pos.y, m.pos.z, function(o)
-            o.parentObj = obj
-
-            o.header.gfx.scale.x = obj.header.gfx.scale.x
-            o.header.gfx.scale.y = obj.header.gfx.scale.y
-            o.header.gfx.scale.z = obj.header.gfx.scale.z
-
-            o.header.gfx.prevScale.x = obj.header.gfx.prevScale.x
-            o.header.gfx.prevScale.y = obj.header.gfx.prevScale.y
-            o.header.gfx.prevScale.z = obj.header.gfx.prevScale.z
-            o.oHeldState = HELD_HELD
-            o.heldByPlayerIndex = network_global_index_from_local(0)
-        end)
-        gPlayerSyncTable[0].heldObjSyncId = heldObj.oSyncID
-        obj_mark_for_deletion(obj)
-    end
-
-    -- If animation ends without making contact with any objects, return to idle state
-    if m.actionTimer > 10 then
-         return set_mario_action(m, ACT_IDLE, 0)
-    end
-
-    m.actionTimer = m.actionTimer + 1
-end
-
 ---Belly Thrust is a stationary attack that sends players and enemies flying on contact
 ---@param m MarioState
 local function belly_thrust_loop(m)
@@ -325,7 +279,7 @@ local function belly_long_jump_loop(m)
     if m.playerIndex ~= 0 then return end
 end
 
----
+---Handles the air jump action, allowing the player to perform multiple jumps in mid air
 ---@param m MarioState
 ---@return integer | nil
 local function air_jump_loop(m)
@@ -358,6 +312,8 @@ local function air_jump_loop(m)
     m.actionTimer = m.actionTimer + 1
 end
 
+---Handles the gravity for the air jump action
+---@param m MarioState
 local function air_jump_gravity(m)
     if m.playerIndex ~= 0 then return end
 
@@ -392,7 +348,6 @@ hook_mario_action(ACT_ROLL, { every_frame = roll_loop, gravity = roll_gravity },
 hook_mario_action(ACT_BELLY_THRUST, belly_thrust_loop, INT_KICK)
 hook_mario_action(ACT_BELLY_LONG_JUMP, belly_long_jump_loop, INT_KICK)
 hook_mario_action(ACT_AIR_JUMP, { every_frame = air_jump_loop, gravity = air_jump_gravity })
-hook_mario_action(ACT_GRAB, grab_loop, INT_PUNCH)
 hook_mario_action(ACT_EATING, eating_loop)
 hook_mario_action(ACT_EATEN, act_eaten_loop)
 hook_mario_action(ACT_HELD, act_held_loop)
