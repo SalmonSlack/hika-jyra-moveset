@@ -1,30 +1,34 @@
 -- name: [CS] Hikaseru
--- description: Hikaseru v0.1 \nTraverse the Super Mario 64 universe with Hikaseru!\n\nCredits\n\nHikaseru Belongs to \\#4287f5\\MidnightLab\n\\#dcdcdc\\Mod Developed by \\#cf9e3c\\Slack
+-- description: Hikaseru v0.1 \nTraverse the Super Mario 64 universe with Hikaseru!\n\nCredits\n\nHikaseru Belongs to \\#4287f5\\MidnightLab\n\\#dcdcdc\\Mod Developed by \\#cf9e3c\\Slack\n\\#dcdcdc\\Code Donations by \\#8742f5\\wibblus
 
 ---@diagnostic disable: undefined-field
 if not _G.charSelectExists then return end
 _G.charSelect = _G.charSelect -- Redefining charSelect to avoid undefined-field errors in this file
 ---@diagnostic enable: undefined-field
 
+-- Adding Hikaseru to Character Select
 E_MODEL_HIKASERU = smlua_model_util_get_id('hikaseru_geo')
 local NAME = "Hikaseru"
 local DESC = { "Desc1", "Desc2" }
-local CREDITS = "Credits"
+local CREDITS = "Model by MidnightLab\nMoveset Developed by Slack\nCode Donations by wibblus"
 local COLOR = { r = 93, g = 178, b = 183 }
 local TEXTURE = get_texture_info("toonTurtleLife")
+CT_HIKASERU = _G.charSelect.character_add(NAME, DESC, CREDITS, COLOR, E_MODEL_HIKASERU, CT_WARIO, TEXTURE)
 
 HIKA_AIR_JUMP_1 = audio_sample_load('hika_air_jump_1.ogg')
 HIKA_AIR_JUMP_2 = audio_sample_load('hika_air_jump_2.ogg')
+HIKA_BOING_1 = audio_sample_load('hika_boing_1.ogg')
 
 BASE_TERMINAL_VELOCITY = -75.0
 HIKA_TERMINAL_VELOCITY = -150.0
 HIKA_GRAVITY_MULT = 1.25
-HIKA_BELLY_FLOP_FORWARD_VEL = 20.0
+HIKA_BELLY_FLOP_FORWARD_VEL = 22.0
 HIKA_AIR_JUMP_VEL = 40.0
 HIKA_AIR_JUMP_COUNT = 5
 HIKA_DIVE_JUMP_VEL = 50.0
 HIKA_ROLL_JUMP_VEL = 40.0
-HIKA_OBJ_THROW_STRENGTH = 60.0
+HIKA_OBJ_THROW_STRENGTH = 70.0
+HIKA_BELLY_LONG_JUMP_PEAK_VEL = 60.0
 
 local IGNORE_GRAVITY_ACTIONS = {
     ACT_BUBBLED,
@@ -66,9 +70,6 @@ local GRABBABLE_OBJECTS = {
     id_bhvSpindrift,
     id_bhvSwoop,
 }
-
--- Adding Hikaseru to Character Select
-CT_HIKASERU = _G.charSelect.character_add(NAME, DESC, CREDITS, COLOR, E_MODEL_HIKASERU, CT_WARIO, TEXTURE)
 
 ---Handles checks that need to occur on every frame
 ---@param m MarioState
@@ -160,7 +161,7 @@ local function before_phys_step(m, stepType)
         -- Allow the player to slow their fall by holding the A button as long as they're not performing a pounding action or an air jump
         if m.action ~= ACT_BELLY_FLOP and m.action ~= ACT_GROUND_POUND and m.action ~= ACT_AIR_JUMP and m.controller.buttonDown & A_BUTTON ~= 0 then
             m.vel.y = math.max(m.vel.y - 2, BASE_TERMINAL_VELOCITY // 2)
-        else
+        elseif m.action ~= ACT_BELLY_LONG_JUMP then
             m.vel.y = math.max(m.vel.y - (4 * HIKA_GRAVITY_MULT) + 4, HIKA_TERMINAL_VELOCITY)
         end
     end
@@ -187,6 +188,10 @@ local function on_attack_object(m, victim)
         o.header.gfx.scale.x = victim.header.gfx.scale.x
         o.header.gfx.scale.y = victim.header.gfx.scale.y
         o.header.gfx.scale.z = victim.header.gfx.scale.z
+
+        -- Defer coins spawning until the player throws and destroys the held object
+        o.oNumLootCoins = victim.oNumLootCoins
+        victim.oNumLootCoins = 0
     end)
 
     m.heldObj = heldObj

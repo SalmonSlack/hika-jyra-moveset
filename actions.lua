@@ -5,7 +5,7 @@ ACT_ROLL = allocate_mario_action(ACT_GROUP_MOVING | ACT_FLAG_MOVING | ACT_FLAG_A
 ACT_AIR_ROLL = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR | ACT_FLAG_ATTACKING |
 ACT_FLAG_ALLOW_VERTICAL_WIND_ACTION)
 ACT_BELLY_THRUST = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY | ACT_FLAG_ATTACKING)
-ACT_BELLY_LONG_JUMP = allocate_mario_action(ACT_GROUP_MOVING | ACT_FLAG_MOVING | ACT_GROUP_AIRBORNE | ACT_FLAG_AIR | ACT_FLAG_ATTACKING) -- Might not need the attacking flag?
+ACT_BELLY_LONG_JUMP = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR | ACT_FLAG_ATTACKING)
 ACT_AIR_JUMP = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR)
 ACT_EATING = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY)
 ACT_EATEN = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_INTANGIBLE)
@@ -277,6 +277,66 @@ end
 ---@param m MarioState
 local function belly_long_jump_loop(m)
     if m.playerIndex ~= 0 then return end
+
+    -- Airborne
+    if m.actionState == 0 then
+        update_air_without_turn(m)
+        local step = perform_air_step(m, 0)
+
+        if m.actionTimer == 0 then
+            set_mario_animation(m, CHAR_ANIM_TRIPLE_JUMP_LAND)
+            m.forwardVel = math.min(m.forwardVel * 1.3, HIKA_BELLY_LONG_JUMP_PEAK_VEL)
+            set_mario_y_vel_based_on_fspeed(m, 30.0, 0.0)
+        end
+
+        set_anim_to_frame(m, 18)
+
+        if step == AIR_STEP_HIT_WALL and m.controller.buttonDown & A_BUTTON ~= 0 and (m.wall ~= nil or gServerSettings.bouncyLevelBounds ~= 1) then
+            m.actionState = 1
+            m.actionTimer = 0
+        elseif step == AIR_STEP_LANDED then
+            return set_mario_action(m, ACT_LONG_JUMP_LAND, 0)
+        end
+    end
+
+    -- Clinging to Wall
+    if m.actionState == 1 then
+        if m.actionTimer == 0 then
+            set_mario_animation(m, CHAR_ANIM_PUSHING)
+        end
+        
+        set_anim_to_frame(m, 0)
+
+        -- If the bounce is fully charged or the player lets go of the A button, bounce off the wall with the current bounce strength
+        if m.actionTimer >= 40 or m.controller.buttonDown & A_BUTTON == 0 then
+            -- If the player isn't holding in any direction, or they aren't holding away from the wall, cancel the bounce
+            if m.input & INPUT_NONZERO_ANALOG == 0 or abs_angle_diff(m.intendedYaw, m.faceAngle.y) < 0x5500 then
+                return set_mario_action(m, ACT_FREEFALL, 0)
+            end
+
+            m.faceAngle.y = m.intendedYaw
+            m.forwardVel = math.min((m.actionTimer / 40) * HIKA_BELLY_LONG_JUMP_PEAK_VEL, HIKA_BELLY_LONG_JUMP_PEAK_VEL)
+            m.actionState = 0
+            m.actionTimer = 1
+            play_hika_wall_bounce_sound(m)
+            set_mario_animation(m, CHAR_ANIM_TRIPLE_JUMP_LAND)
+            set_mario_y_vel_based_on_fspeed(m, 30.0, 0.0)
+        end
+    end
+
+    m.actionTimer = m.actionTimer + 1
+end
+
+---Handles the gravity for the belly long jump action
+---@param m MarioState
+local function belly_long_jump_gravity(m)
+    if m.playerIndex ~= 0 then return end
+
+    if m.actionState == 0 and m.vel.y > 0.0 and m.controller.buttonDown & A_BUTTON ~= 0 then
+        m.vel.y = math.max(m.vel.y - 2 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
+    else
+        m.vel.y = math.max(m.vel.y - 4.0 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
+    end
 end
 
 ---Handles the air jump action, allowing the player to perform multiple jumps in mid air
@@ -346,7 +406,7 @@ hook_mario_action(ACT_BELLY_TRAMPOLINE, belly_trampoline_loop)
 hook_mario_action(ACT_BELLY_FLOP, { every_frame = belly_flop_loop, gravity = belly_flop_gravity }, INT_GROUND_POUND)
 hook_mario_action(ACT_ROLL, { every_frame = roll_loop, gravity = roll_gravity }, INT_GROUND_POUND)
 hook_mario_action(ACT_BELLY_THRUST, belly_thrust_loop, INT_KICK)
-hook_mario_action(ACT_BELLY_LONG_JUMP, belly_long_jump_loop, INT_KICK)
+hook_mario_action(ACT_BELLY_LONG_JUMP, { every_frame = belly_long_jump_loop, gravity = belly_long_jump_gravity }, INT_KICK)
 hook_mario_action(ACT_AIR_JUMP, { every_frame = air_jump_loop, gravity = air_jump_gravity })
 hook_mario_action(ACT_EATING, eating_loop)
 hook_mario_action(ACT_EATEN, act_eaten_loop)

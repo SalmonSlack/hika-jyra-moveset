@@ -26,11 +26,21 @@ function create_wall_impact_effects(m)
     set_mario_particle_flags(m, PARTICLE_VERTICAL_STAR, 0)
 end
 
--- Plays Hikaserus air jump sound effect
+-- Plays Hikaseru's air jump sound effect
 ---@param m MarioState
 function play_hika_air_jump_sound(m)
     local vol = 1.0
     local sample = math.random() < 0.5 and HIKA_AIR_JUMP_1 or HIKA_AIR_JUMP_2
+    if is_game_paused() then vol = 0.1 end
+    audio_sample_stop(sample)
+    audio_sample_play(sample, m.pos, vol)
+end
+
+-- Plays Hikaseru's wall bounce sound effect
+---@param m MarioState
+function play_hika_wall_bounce_sound(m)
+    local vol = 1.0
+    local sample = HIKA_BOING_1
     if is_game_paused() then vol = 0.1 end
     audio_sample_stop(sample)
     audio_sample_play(sample, m.pos, vol)
