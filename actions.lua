@@ -19,29 +19,29 @@ local function belly_trampoline_loop(m)
 
     -- Hika rolls onto his back
     if m.actionState == 0 then
-        if m.actionTimer == 15 then -- Placeholder number representing how long the animation takes to play
+        if m.actionTimer == 0 then
+            set_mario_animation(m, CHAR_ANIM_FALL_OVER_BACKWARDS)
+        end
+
+        if m.actionTimer == 30 then
             m.actionState = 1
             m.actionTimer = 0
+            return
         end
 
     -- Hika is on his back and can be bounced on by other players
     elseif m.actionState == 1 then
+        set_anim_to_frame(m, math.min(m.marioObj.header.gfx.animInfo.animFrame, 42))
+
         -- If the player presses the A button, B button, or moves the control stick, they will start to get up
          if m.input & INPUT_NONZERO_ANALOG ~= 0 or m.input & INPUT_A_PRESSED ~= 0 or m.input & INPUT_B_PRESSED ~= 0 then
-            m.actionState = 3
+            m.actionState = 2
             m.actionTimer = 0
         end
 
-    -- Hika has a player bounce on him, leaving him momentarily unable to get up until the bounce animation finishes
+    -- Hika gets up from the ground
     elseif m.actionState == 2 then
-        if m.actionTimer >= 15 then -- Placeholder number representing how long the bounce animation takes to play
-            m.actionState = 1
-            m.actionTimer = 0
-        end
-
-    -- Hika gets up from his laying position and returns to idle
-    elseif m.actionState == 3 then
-        if m.actionTimer >= 15 then -- Placeholder actionTimer representing how long the get up animation takes
+        if m.actionTimer >= 38 then
             return set_mario_action(m, ACT_IDLE, 0)
         end
     end
@@ -97,9 +97,10 @@ local function belly_flop_loop(m)
         -- Decelerate the player
         m.forwardVel = approach_f32(m.forwardVel, 0.0, 0.0, 1.0)
 
-        if m.actionTimer >= 7 then
+        if m.actionTimer >= 10 then
             if m.controller.buttonDown & A_BUTTON ~= 0 then
                 set_mario_animation(m, CHAR_ANIM_DIVE)
+                network_select_and_play_audio(m.pos, "BOUNCE", m.marioObj.globalPlayerIndex)
                 m.vel.y = 60.0
                 m.actionState = 2
                 m.actionTimer = 0
@@ -292,6 +293,8 @@ local function belly_long_jump_loop(m)
         set_anim_to_frame(m, 18)
 
         if step == AIR_STEP_HIT_WALL and m.controller.buttonDown & A_BUTTON ~= 0 and (m.wall ~= nil or gServerSettings.bouncyLevelBounds ~= 1) then
+            set_mario_animation(m, CHAR_ANIM_PUSHING)
+            select_and_play_audio(m.pos, "STRAIN")
             m.actionState = 1
             m.actionTimer = 0
         elseif step == AIR_STEP_LANDED then
@@ -301,16 +304,14 @@ local function belly_long_jump_loop(m)
 
     -- Clinging to Wall
     if m.actionState == 1 then
-        if m.actionTimer == 0 then
-            set_mario_animation(m, CHAR_ANIM_PUSHING)
-        end
-        
         set_anim_to_frame(m, 0)
 
         -- If the bounce is fully charged or the player lets go of the A button, bounce off the wall with the current bounce strength
         if m.actionTimer >= 40 or m.controller.buttonDown & A_BUTTON == 0 then
+            stop_audio_samples(SOUNDS_TABLE["STRAIN"])
             -- If the player isn't holding in any direction, or they aren't holding away from the wall, cancel the bounce
             if m.input & INPUT_NONZERO_ANALOG == 0 or abs_angle_diff(m.intendedYaw, m.faceAngle.y) < 0x5500 then
+                m.forwardVel = 0
                 return set_mario_action(m, ACT_FREEFALL, 0)
             end
 
@@ -318,7 +319,8 @@ local function belly_long_jump_loop(m)
             m.forwardVel = math.min((m.actionTimer / 40) * HIKA_BELLY_LONG_JUMP_PEAK_VEL, HIKA_BELLY_LONG_JUMP_PEAK_VEL)
             m.actionState = 0
             m.actionTimer = 1
-            play_hika_wall_bounce_sound(m)
+            set_mario_particle_flags(m, PARTICLE_DUST, 0)
+            network_select_and_play_audio(m.pos, "BOUNCE", m.marioObj.globalPlayerIndex)
             set_mario_animation(m, CHAR_ANIM_TRIPLE_JUMP_LAND)
             set_mario_y_vel_based_on_fspeed(m, 30.0, 0.0)
         end
@@ -352,7 +354,7 @@ local function air_jump_loop(m)
 
     if m.actionTimer == 0 then
         set_mario_animation(m, CHAR_ANIM_CROUCHING)
-        play_hika_air_jump_sound(m)
+        network_select_and_play_audio(m.pos, "AIR_JUMP", m.marioObj.globalPlayerIndex)
         m.vel.y = HIKA_AIR_JUMP_VEL
         m.faceAngle.y = m.intendedYaw
         gPlayerSyncTable[0].airJumpCount = gPlayerSyncTable[0].airJumpCount + 1

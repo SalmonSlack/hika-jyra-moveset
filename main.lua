@@ -15,21 +15,36 @@ local COLOR = { r = 93, g = 178, b = 183 }
 local TEXTURE = get_texture_info("toonTurtleLife")
 CT_HIKASERU = _G.charSelect.character_add(NAME, DESC, CREDITS, COLOR, E_MODEL_HIKASERU, CT_WARIO, TEXTURE)
 
-HIKA_AIR_JUMP_1 = audio_sample_load('hika_air_jump_1.ogg')
-HIKA_AIR_JUMP_2 = audio_sample_load('hika_air_jump_2.ogg')
-HIKA_BOING_1 = audio_sample_load('hika_boing_1.ogg')
+-- Audio
+SOUND_AIR_JUMP_1 = audio_sample_load('hika_air_jump_1.ogg')
+SOUND_AIR_JUMP_2 = audio_sample_load('hika_air_jump_2.ogg')
+SOUND_BOUNCE_1 = audio_sample_load('hika_boing_1.ogg')
+SOUND_BOUNCE_2 = audio_sample_load('hika_boing_2.ogg')
+SOUND_BOUNCE_3 = audio_sample_load('hika_boing_3.ogg')
+SOUND_STRAIN_1 = audio_sample_load('hika_strain_1.ogg')
 
-BASE_TERMINAL_VELOCITY = -75.0
-HIKA_TERMINAL_VELOCITY = -150.0
-HIKA_GRAVITY_MULT = 1.25
-HIKA_BELLY_FLOP_FORWARD_VEL = 22.0
-HIKA_AIR_JUMP_VEL = 40.0
-HIKA_AIR_JUMP_COUNT = 5
-HIKA_DIVE_JUMP_VEL = 50.0
-HIKA_ROLL_JUMP_VEL = 40.0
-HIKA_OBJ_THROW_STRENGTH = 70.0
-HIKA_BELLY_LONG_JUMP_PEAK_VEL = 60.0
+SOUNDS_TABLE = {
+    ["AIR_JUMP"] = { SOUND_AIR_JUMP_1, SOUND_AIR_JUMP_2 },
+    ["BOUNCE"] = { SOUND_BOUNCE_1, SOUND_BOUNCE_2, SOUND_BOUNCE_3 },
+    ["STRAIN"] = { SOUND_STRAIN_1 },
+}
 
+-- Physics Constants
+BASE_TERMINAL_VELOCITY = -75.0 -- The vanilla maximum speed a player can be falling at
+HIKA_TERMINAL_VELOCITY = -150.0 -- The maximum speed Hikaseru can fall at
+HIKA_GRAVITY_MULT = 1.25 -- The multiplier for how much gravity affects Hikaseru
+HIKA_BELLY_FLOP_FORWARD_VEL = 22.0 -- The maximum speed Hikaseru can move during a belly flop
+HIKA_AIR_JUMP_VEL = 40.0 -- The maximum height of each air jump
+HIKA_AIR_JUMP_COUNT = 5 -- The number of air jumps Hikaseru can perform before touching ground
+HIKA_DIVE_JUMP_VEL = 50.0 -- The height Hikaseru will jump when initiating a belly flop from the ground
+HIKA_ROLL_JUMP_VEL = 40.0 -- The maximum height Hikaseru can reach when jumping during a roll
+HIKA_OBJ_THROW_STRENGTH = 70.0 -- The speed objects travel when thrown by Hikaseru
+HIKA_BELLY_LONG_JUMP_PEAK_VEL = 60.0 -- The maximum speed Hikaseru can reach during a belly long jump
+HIKA_TRAMPOLINE_MAX_HEIGHT = 240.00 -- The maximum height a player can bounce to when bouncing off a Hikaseru in the trampoline state 
+HIKA_TRAMPOLINE_VEL_INFLUENCE = 0.5 -- The amount a player's downward velocity should affect their bounce height off of a Hikaseru in the trampoline state
+HIKA_TRAMPOLINE_BOUNCE_STRENGTH = 1.5 -- The multiplier for how much higher a player should bounce off of a Hikaseru in the trampoline state after other factors are calculated
+
+-- Actions where Hikaseru's gravity multiplier won't apply
 local IGNORE_GRAVITY_ACTIONS = {
     ACT_BUBBLED,
     ACT_FALL_AFTER_STAR_GRAB,
@@ -38,8 +53,10 @@ local IGNORE_GRAVITY_ACTIONS = {
     ACT_SHOT_FROM_CANNON,
     ACT_TORNADO_TWIRLING,
     ACT_TWIRLING,
+    ACT_BELLY_LONG_JUMP
 }
 
+-- Actions Hikaseru must be in to perform an air jump
 local VALID_AIR_JUMP_ACTIONS = {
     ACT_FREEFALL,
     ACT_JUMP,
@@ -49,8 +66,44 @@ local VALID_AIR_JUMP_ACTIONS = {
     ACT_BELLY_FLOP,
 }
 
--- Enemies Hika will pick up instead of punching
--- Stretch goal is to give each "held enemy" we generate different properties when being held such as gravity, style of impact when it hits someone, etc.
+-- Actions a player must be in to trampoline off Hikaseru's belly, along with their properties
+local TRAMPOLINE_ACTION_VALS = {
+    [ACT_FREEFALL] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_JUMP] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_DOUBLE_JUMP] = {
+        baseBounceHeight = 69.0,
+        nextAction = ACT_TRIPLE_JUMP,
+    },
+    [ACT_TRIPLE_JUMP] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_SIDE_FLIP] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_BACKFLIP] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_GROUND_POUND] = {
+        baseBounceHeight = 82.0,
+        nextAction = ACT_DOUBLE_JUMP,
+    },
+    [ACT_TWIRLING] = {
+        baseBounceHeight = 52.0,
+        nextAction = ACT_TWIRLING,
+    },
+}
+
+-- Enemies Hikaseru will pick up instead of punching
+-- Stretch goal is to give each "held enemy" different properties when being held and thrown such as gravity, style of impact when it hits someone, etc.
 local GRABBABLE_OBJECTS = {
     id_bhvBoo,
     id_bhvBooInCastle,
@@ -73,14 +126,17 @@ local GRABBABLE_OBJECTS = {
 
 ---Handles checks that need to occur on every frame
 ---@param m MarioState
-local function mario_update(m)
+local function hikaseru_update(m)
     if m.playerIndex ~= 0 then return end
 
-    -- When the player is grounded, reset their air jumps to zero
+    -- When the player is grounded, reset their air jumps and belly bounce count to zero
     if m.action & ACT_FLAG_AIR == 0 then
         gPlayerSyncTable[0].airJumpCount = 0
         gPlayerSyncTable[0].bellyBounces = 0
     end
+
+    -- Getting the trampoline behavior to work ended up requiring some workarounds. If the player loses their INTERACT_PLAYER interact type, we can override the default bounce behavior
+    gPlayerSyncTable[0].isBounceable = m.action == ACT_BELLY_TRAMPOLINE and m.actionState == 1
 
     -- Handles the air jump action
     if m.action & ACT_FLAG_AIR and m.vel.y <= 0 and gPlayerSyncTable[0].airJumpCount < HIKA_AIR_JUMP_COUNT and is_value_in_list(m.action, VALID_AIR_JUMP_ACTIONS) then
@@ -117,7 +173,7 @@ end
 ---Handles overriding existing actions with our custom ones
 ---@param m MarioState
 ---@param incomingAction integer
-local function before_set_mario_action(m, incomingAction)
+local function before_set_hikaseru_action(m, incomingAction)
     if m.playerIndex ~= 0 then return end
 
     if incomingAction == ACT_BACKFLIP then
@@ -141,6 +197,7 @@ local function before_set_mario_action(m, incomingAction)
     end
 
     if incomingAction == ACT_LONG_JUMP then
+        play_character_sound(m, CHAR_SOUND_YAHOO)
         return ACT_BELLY_LONG_JUMP
     end
 
@@ -161,7 +218,7 @@ local function before_phys_step(m, stepType)
         -- Allow the player to slow their fall by holding the A button as long as they're not performing a pounding action or an air jump
         if m.action ~= ACT_BELLY_FLOP and m.action ~= ACT_GROUND_POUND and m.action ~= ACT_AIR_JUMP and m.controller.buttonDown & A_BUTTON ~= 0 then
             m.vel.y = math.max(m.vel.y - 2, BASE_TERMINAL_VELOCITY // 2)
-        elseif m.action ~= ACT_BELLY_LONG_JUMP then
+        else
             m.vel.y = math.max(m.vel.y - (4 * HIKA_GRAVITY_MULT) + 4, HIKA_TERMINAL_VELOCITY)
         end
     end
@@ -199,9 +256,63 @@ local function on_attack_object(m, victim)
     set_mario_action(m, ACT_HOLD_IDLE, 0)
 end
 
--- Event Hooks
-_G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_MARIO_UPDATE, mario_update)
-_G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action)
+---Handles the grab interaction between players
+---@param attacker MarioState
+---@param victim MarioState
+---@param interaction integer
+local function on_pvp_attack(attacker, victim, interaction)
+    if attacker.playerIndex ~= 0 then return end
+end
+
+---Prevent players from ground pounding Hikaseru while in the trampoline state
+---@param victim MarioState
+---@param interaction integer
+local function allow_pvp_attack(_, victim, interaction)
+    return not (gPlayerSyncTable[victim.playerIndex].isBounceable and (interaction == INT_GROUND_POUND or interaction == INT_TWIRL))
+end
+
+---Handles the bounce interaction. Unlike most of the code, this hook is focusing on the non Hikaseru player
+---@param m MarioState
+---@param o Object
+local function on_interact(m, o)
+    if m.playerIndex ~= 0 or not TRAMPOLINE_ACTION_VALS[m.action] then return end
+    
+    -- Get the Hikaseru player and confirm both players are in a valid state to allow for a bounce
+    local mV = get_mario_state_from_object(o)
+    if not mV or not gPlayerSyncTable[mV.playerIndex].isBounceable then return end
+
+    -- Calculate the bounce height based on the player's downward velocity and current action
+    local velInfluence = math.abs(m.vel.y * HIKA_TRAMPOLINE_VEL_INFLUENCE)
+    local baseBounceHeight = TRAMPOLINE_ACTION_VALS[m.action].baseBounceHeight
+    local bounceHeight = math.min((baseBounceHeight + velInfluence) * HIKA_TRAMPOLINE_BOUNCE_STRENGTH, HIKA_TRAMPOLINE_MAX_HEIGHT)
+    m.vel.y = bounceHeight
+    mV.marioObj.header.gfx.animInfo.animFrame = 32
+end
+
+---Ensures audio and visual updates are seen for all players
+---@param dataTable table
+local function on_receive_packet(dataTable)
+    if dataTable and dataTable.key == "sendAudioSample" then
+        local m = gMarioStates[0]
+        local networkPlayer = network_player_from_global_index(m.marioObj.globalPlayerIndex)
+        -- TODO: Clean this up tomorrow, not a huge fan of passing an optional variable to the function
+        if networkPlayer.currAreaIndex == dataTable.currAreaIndex and
+           networkPlayer.currActNum == dataTable.currActNum and
+           networkPlayer.currCourseNum == dataTable.currCourseNum and
+           networkPlayer.currLevelNum == dataTable.currLevelNum then
+            select_and_play_audio({ x = dataTable.posX, y = dataTable.posY, z = dataTable.posZ }, dataTable.samplesKey, dataTable.samplesIndex)
+        end
+    end
+end
+
+-- Moveset Hooks
+_G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_MARIO_UPDATE, hikaseru_update)
+_G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_SET_MARIO_ACTION, before_set_hikaseru_action)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_PHYS_STEP, before_phys_step)
 
+-- Event Hooks
 hook_event(HOOK_ON_ATTACK_OBJECT, on_attack_object)
+hook_event(HOOK_ON_PVP_ATTACK, on_pvp_attack)
+hook_event(HOOK_ALLOW_PVP_ATTACK, allow_pvp_attack)
+hook_event(HOOK_ON_INTERACT, on_interact)
+hook_event(HOOK_ON_PACKET_RECEIVE, on_receive_packet)

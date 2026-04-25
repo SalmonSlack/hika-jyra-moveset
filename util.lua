@@ -26,22 +26,52 @@ function create_wall_impact_effects(m)
     set_mario_particle_flags(m, PARTICLE_VERTICAL_STAR, 0)
 end
 
--- Plays Hikaseru's air jump sound effect
----@param m MarioState
-function play_hika_air_jump_sound(m)
-    local vol = 1.0
-    local sample = math.random() < 0.5 and HIKA_AIR_JUMP_1 or HIKA_AIR_JUMP_2
-    if is_game_paused() then vol = 0.1 end
-    audio_sample_stop(sample)
-    audio_sample_play(sample, m.pos, vol)
+---Stops playing all the samples in a given list, useful for cancelling an action
+---@param samples ModAudio[]
+function stop_audio_samples(samples)
+    for i = 1, #samples do
+        audio_sample_stop(samples[i])
+    end
 end
 
--- Plays Hikaseru's wall bounce sound effect
----@param m MarioState
-function play_hika_wall_bounce_sound(m)
-    local vol = 1.0
-    local sample = HIKA_BOING_1
+function play_audio(sample, pos, vol)
     if is_game_paused() then vol = 0.1 end
     audio_sample_stop(sample)
-    audio_sample_play(sample, m.pos, vol)
+    audio_sample_play(sample, pos, vol)
+end
+
+---Selects a random audio from a given table and plays it at Mario's current position
+---@param pos Vec3f
+---@param samplesKey string
+---@param sampleIndex integer? If specified, gets the specific sample from the sample list
+---@return integer
+function select_and_play_audio(pos, samplesKey, sampleIndex)
+    local sampleIndex = sampleIndex or math.random(1, #SOUNDS_TABLE[samplesKey])
+    local sample = SOUNDS_TABLE[samplesKey][sampleIndex]
+    local vol = 1.0
+    stop_audio_samples(SOUNDS_TABLE[samplesKey])
+    play_audio(sample, pos, vol)
+    return sampleIndex
+end
+
+---Selects a random audio from a given table and play's it at Mario's current position for all players in the area
+---@param pos Vec3f
+---@param samplesKey string
+---@param globalPlayerIndex integer
+function network_select_and_play_audio(pos, samplesKey, globalPlayerIndex)
+    local sampleIndex = select_and_play_audio(pos, samplesKey, 1.0)
+    local networkPlayer = network_player_from_global_index(globalPlayerIndex)
+
+    network_send(false, {
+        key = "sendAudioSample",
+        sampleIndex = sampleIndex,
+        samplesKey = samplesKey,
+        posX = pos.x,
+        posY = pos.y,
+        posZ = pos.z,
+        currAreaIndex = networkPlayer.currAreaIndex,
+        currActNum = networkPlayer.currActNum,
+        currCourseNum = networkPlayer.currCourseNum,
+        currLevelNum = networkPlayer.currLevelNum
+    })
 end
