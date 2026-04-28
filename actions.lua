@@ -8,15 +8,16 @@ ACT_BELLY_THRUST = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATION
 ACT_BELLY_LONG_JUMP = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR | ACT_FLAG_ATTACKING)
 ACT_AIR_JUMP = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR)
 ACT_EATING = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY)
+ACT_SPIT = allocate_mario_action(ACT_GROUP_STATIONARY | ACT_FLAG_STATIONARY)
+ACT_AIR_SPIT = allocate_mario_action(ACT_GROUP_AIRBORNE | ACT_FLAG_AIR)
 ACT_EATEN = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_INTANGIBLE)
-ACT_HELD = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_INTANGIBLE)
+ACT_HELD = allocate_mario_action(ACT_GROUP_CUTSCENE | ACT_FLAG_STATIONARY | ACT_FLAG_INTANGIBLE | ACT_FLAG_INVULNERABLE | ACT_FLAG_PAUSE_EXIT)
+ACT_SPAT_OUT = allocate_mario_action(ACT_GROUP_AUTOMATIC | ACT_FLAG_AIR | ACT_FLAG_ATTACKING)
 
 ---Belly Trampoline immobilizes the player and allows others to bounce off of their belly
 ---@param m MarioState
 ---@return integer | nil
 local function belly_trampoline_loop(m)
-    if m.playerIndex ~= 0 then return end
-
     -- Hika rolls onto his back
     if m.actionState == 0 then
         if m.actionTimer == 0 then
@@ -53,10 +54,8 @@ end
 ---@param m MarioState
 ---@return integer | nil
 local function belly_flop_loop(m)
-    if m.playerIndex ~= 0 then return end
-
     -- Cap out forward velocity after first bounce
-    if gPlayerSyncTable[0].bellyBounces > 0 then
+    if gPlayerSyncTable[m.playerIndex].bellyBounces > 0 then
         m.forwardVel = math.min(m.forwardVel, HIKA_BELLY_FLOP_FORWARD_VEL)
     else
         m.forwardVel = approach_f32(m.forwardVel, HIKA_BELLY_FLOP_FORWARD_VEL, 0.0, 2.0)
@@ -76,7 +75,9 @@ local function belly_flop_loop(m)
             create_impact_effects(m)
             m.actionState = 1
             m.actionTimer = 0
-            gPlayerSyncTable[0].bellyBounces = gPlayerSyncTable[0].bellyBounces + 1
+            if m.playerIndex == 0 then
+                gPlayerSyncTable[m.playerIndex].bellyBounces = gPlayerSyncTable[m.playerIndex].bellyBounces + 1
+            end
             return
         end
 
@@ -100,7 +101,7 @@ local function belly_flop_loop(m)
         if m.actionTimer >= 10 then
             if m.controller.buttonDown & A_BUTTON ~= 0 then
                 set_mario_animation(m, CHAR_ANIM_DIVE)
-                network_select_and_play_audio(m.pos, "BOUNCE", m.marioObj.globalPlayerIndex)
+                select_and_play_audio(m.pos, BOUNCE)
                 m.vel.y = 60.0
                 m.actionState = 2
                 m.actionTimer = 0
@@ -140,8 +141,6 @@ end
 ---Handles the gravity for the belly flop action
 ---@param m MarioState
 local function belly_flop_gravity(m)
-    if m.playerIndex ~= 0 then return end
-
     if m.actionState == 2 and m.controller.buttonDown & A_BUTTON ~= 0 then
         m.vel.y = math.max(m.vel.y - 2 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
     else
@@ -153,8 +152,6 @@ end
 ---@param m MarioState
 ---@return integer | nil
 local function roll_loop(m)
-    if m.playerIndex ~= 0 then return end
-
     if m.actionTimer == 0 then
         set_mario_animation(m, MARIO_ANIM_SLOW_LONGJUMP)
         m.actionState = 0
@@ -259,8 +256,6 @@ end
 ---Handles the gravity for the roll action
 ---@param m MarioState
 local function roll_gravity(m)
-    if m.playerIndex ~= 0 then return end
-
     if m.actionState == 1 and m.vel.y > 0.0 and m.controller.buttonDown & A_BUTTON ~= 0 then
         m.vel.y = math.max(m.vel.y - 2.0 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
     else
@@ -271,14 +266,11 @@ end
 ---Belly Thrust is a stationary attack that sends players and enemies flying on contact
 ---@param m MarioState
 local function belly_thrust_loop(m)
-    if m.playerIndex ~= 0 then return end
 end
 
 ---Belly Long Jump acts like a long jump but making contact with players will send them flying
 ---@param m MarioState
 local function belly_long_jump_loop(m)
-    if m.playerIndex ~= 0 then return end
-
     -- Airborne
     if m.actionState == 0 then
         update_air_without_turn(m)
@@ -294,7 +286,7 @@ local function belly_long_jump_loop(m)
 
         if step == AIR_STEP_HIT_WALL and m.controller.buttonDown & A_BUTTON ~= 0 and (m.wall ~= nil or gServerSettings.bouncyLevelBounds ~= 1) then
             set_mario_animation(m, CHAR_ANIM_PUSHING)
-            select_and_play_audio(m.pos, "STRAIN")
+            select_and_play_audio(m.pos, STRAIN)
             m.actionState = 1
             m.actionTimer = 0
         elseif step == AIR_STEP_LANDED then
@@ -308,7 +300,7 @@ local function belly_long_jump_loop(m)
 
         -- If the bounce is fully charged or the player lets go of the A button, bounce off the wall with the current bounce strength
         if m.actionTimer >= 40 or m.controller.buttonDown & A_BUTTON == 0 then
-            stop_audio_samples(SOUNDS_TABLE["STRAIN"])
+            stop_audio_samples(SOUNDS_TABLE[STRAIN])
             -- If the player isn't holding in any direction, or they aren't holding away from the wall, cancel the bounce
             if m.input & INPUT_NONZERO_ANALOG == 0 or abs_angle_diff(m.intendedYaw, m.faceAngle.y) < 0x5500 then
                 m.forwardVel = 0
@@ -320,7 +312,7 @@ local function belly_long_jump_loop(m)
             m.actionState = 0
             m.actionTimer = 1
             set_mario_particle_flags(m, PARTICLE_DUST, 0)
-            network_select_and_play_audio(m.pos, "BOUNCE", m.marioObj.globalPlayerIndex)
+            select_and_play_audio(m.pos, BOUNCE)
             set_mario_animation(m, CHAR_ANIM_TRIPLE_JUMP_LAND)
             set_mario_y_vel_based_on_fspeed(m, 30.0, 0.0)
         end
@@ -332,8 +324,6 @@ end
 ---Handles the gravity for the belly long jump action
 ---@param m MarioState
 local function belly_long_jump_gravity(m)
-    if m.playerIndex ~= 0 then return end
-
     if m.actionState == 0 and m.vel.y > 0.0 and m.controller.buttonDown & A_BUTTON ~= 0 then
         m.vel.y = math.max(m.vel.y - 2 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
     else
@@ -345,8 +335,6 @@ end
 ---@param m MarioState
 ---@return integer | nil
 local function air_jump_loop(m)
-    if m.playerIndex ~= 0 then return end
-
     m.forwardVel = math.min(m.forwardVel, HIKA_BELLY_FLOP_FORWARD_VEL)
 
     update_air_with_turn(m)
@@ -354,10 +342,12 @@ local function air_jump_loop(m)
 
     if m.actionTimer == 0 then
         set_mario_animation(m, CHAR_ANIM_CROUCHING)
-        network_select_and_play_audio(m.pos, "AIR_JUMP", m.marioObj.globalPlayerIndex)
+        select_and_play_audio(m.pos, AIR_JUMP)
         m.vel.y = HIKA_AIR_JUMP_VEL
         m.faceAngle.y = m.intendedYaw
-        gPlayerSyncTable[0].airJumpCount = gPlayerSyncTable[0].airJumpCount + 1
+        if m.playerIndex == 0 then
+            gPlayerSyncTable[m.playerIndex].airJumpCount = gPlayerSyncTable[m.playerIndex].airJumpCount + 1
+        end
     end
 
     -- Allows the player to belly flop or ground pound out of an air jump
@@ -377,8 +367,6 @@ end
 ---Handles the gravity for the air jump action
 ---@param m MarioState
 local function air_jump_gravity(m)
-    if m.playerIndex ~= 0 then return end
-
     if m.controller.buttonDown & A_BUTTON ~= 0 then
         m.vel.y = math.max(m.vel.y - 2 * HIKA_GRAVITY_MULT, HIKA_TERMINAL_VELOCITY)
     else
@@ -389,27 +377,188 @@ end
 ---Eating is the state where the player puts another player or object into their mouth
 ---@param m MarioState
 local function eating_loop(m)
-    if m.playerIndex ~= 0 then return end
+    if m.actionTimer == 0 then
+        set_mario_animation(m, CHAR_ANIM_COUGHING)
+    end
+
+    -- At animation end, update the player's held/eaten object info
+    if m.actionTimer == 29 then
+        -- Players can have a held player / object and an eaten player / object at the same time
+        log_to_console("Held Player Global ID: " .. tostring(gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId))
+        if gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId ~= nil then
+            gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId = gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId
+            local heldPlayerLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId)
+            if heldPlayerLocalIndex then
+                local heldPlayer = gMarioStates[heldPlayerLocalIndex]
+                if heldPlayer then
+                    log_to_console("PLAYER ACT EATEN")
+                    gPlayerSyncTable[heldPlayer.playerIndex].eaterGlobalId = m.playerIndex
+                    log_to_console("LINE 396 SETTING HOLDERGlobalId TO nil")
+                    gPlayerSyncTable[heldPlayer.playerIndex].holderGlobalId = nil
+                    set_mario_action(heldPlayer, ACT_EATEN, 0)
+                end
+            end
+        else
+            log_to_console("OBJ ACT EATEN")
+            gPlayerSyncTable[m.playerIndex].eatenObjSyncId = gPlayerSyncTable[m.playerIndex].heldObjSyncId
+            local heldObj = sync_object_get_object(gPlayerSyncTable[m.playerIndex].heldObjSyncId)
+            if heldObj then
+                heldObj.oBehParams = 1 -- Tells the object to act eaten
+            end
+        end
+
+        log_to_console("LINE 410 SETTING heldPLAYERGlobalId TO nil ")
+        gPlayerSyncTable[m.playerIndex].heldObjSyncId = nil
+        gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId = nil
+        if m.heldObj then m.heldObj = nil end
+    end
+
+    -- Simulate chewing. This won't need to exist when we move on from using placeholders
+    if m.actionTimer == 38 then
+        set_anim_to_frame(m, 29)
+    elseif m.actionTimer == 47 then
+        set_anim_to_frame(m, 29)
+    end
+
+    if m.actionTimer == 51 then
+        return set_mario_action(m, ACT_IDLE, 0)
+    end
+
+    m.actionTimer = m.actionTimer + 1
+end
+
+---Handles the spitting out action which re-renders the eaten object or player and sends it flying forward
+---@param m MarioState
+local function spit_loop(m)
+    -- Reset all held / eaten attributes and set the object / player into their spat out states
+    if m.actionTimer == 0 then
+        smlua_anim_util_set_animation(m.marioObj, CHAR_ANIM_HIKA_SPIT)
+        set_anim_to_frame(m, 0)
+        if m.action & ACT_FLAG_AIR == 0 then
+            m.forwardVel = 0
+            m.slideVelX = 0
+            m.slideVelZ = 0
+        end
+    end
+
+    -- This is the part of the animation we want to re-render the object / player
+    if m.actionTimer == 5 then
+        if gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId then
+            local eatenPlayerLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId)
+            if eatenPlayerLocalIndex then
+                local eatenPlayer = gMarioStates[eatenPlayerLocalIndex]
+                if eatenPlayer then
+                    set_mario_action(eatenPlayer, ACT_SPAT_OUT, 0)
+                end
+            end
+        elseif gPlayerSyncTable[m.playerIndex].eatenObjSyncId then
+             local eatenObj = sync_object_get_object(gPlayerSyncTable[m.playerIndex].eatenObjSyncId)
+             if eatenObj then
+                eatenObj.oHeldState = HELD_THROWN
+             end
+        end
+
+        log_to_console("LINE 461 SETTING heldPLAYERGlobalId TO nil ")
+        gPlayerSyncTable[m.playerIndex].heldObjSyncId = nil
+        gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId = nil
+        gPlayerSyncTable[m.playerIndex].eatenObjSyncId = nil
+        gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId = nil
+    end
+
+    -- At animation end, return back to idle
+    if m.actionTimer == 25 then
+        if m.action & ACT_FLAG_AIR ~= 0 then
+            return set_mario_action(m, ACT_FREEFALL, 0)
+        else
+            return set_mario_action(m, ACT_IDLE, 0)
+        end
+    end
+
+    m.actionTimer = m.actionTimer + 1
 end
 
 ---Eaten is the state where a player has been put into a Hikaseru player's mouth, limiting available actions
 ---@param m MarioState
 local function act_eaten_loop(m)
-    if m.playerIndex ~= 0 then return end
+    cur_obj_disable_rendering()
+end
+
+---Spat out is the state where a player is sent flying through the after Hikaseru spits them out
+---@param m MarioState
+local function act_spat_out_loop(m)
+    if m.actionTimer == 0 then
+        log_to_console("ACT_SPAT_OUT")
+        set_mario_animation(m, CHAR_ANIM_BACKWARD_AIR_KB)
+        gPlayerSyncTable[m.playerIndex].holderGlobalId = nil
+        gPlayerSyncTable[m.playerIndex].eaterGlobalId = nil
+        m.forwardVel = HIKA_PLAYER_SPIT_STRENGTH
+    end
+
+    m.forwardVel = approach_f32(m.forwardVel, 0.0, 0.0, 1.0)
+
+    -- Allows the player to cancel their flight through the air
+    if m.actionTimer >= 30 then
+        if m.controller.buttonPressed & A_BUTTON ~= 0 then
+            return set_mario_action(m, ACT_JUMP, 0)
+        elseif m.controller.buttonPressed & B_BUTTON ~= 0 then
+            return set_mario_action(m, ACT_JUMP_KICK, 0)
+        elseif m.controller.buttonPressed & Z_TRIG ~= 0 then
+            return set_mario_action(m, ACT_GROUND_POUND, 0)
+        end
+    end
+end
+
+---Handles the gravity for the spat out state
+---@param m MarioState
+local function act_spat_out_gravity(m)
+    if m.actionTimer < 30 then
+        m.vel.y = 0
+    else
+        m.vel.y = math.max(m.vel.y - 4.0, BASE_TERMINAL_VELOCITY)
+    end
 end
 
 ---Held is the state where a player is being held in a Hikaseru player's hands like a box or other holdable object
 ---@param m MarioState
 local function act_held_loop(m)
-    if m.playerIndex ~= 0 then return end
+    if m.actionTimer == 0 then
+        set_mario_animation(m, CHAR_ANIM_BEING_GRABBED)
+    end
+
+    local holderLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].holderGlobalId)
+    local holder = gMarioStates[holderLocalIndex]
+
+    if not holder then
+        return set_mario_action(m, ACT_IDLE, 0)
+    end
+
+    m.pos.x = holder.pos.x + coss(holder.faceAngle.y) * 30.0
+    m.pos.y = holder.pos.y + 40.0
+    m.pos.z = holder.pos.z + sins(holder.faceAngle.y) * 30.0
+
+    m.marioObj.header.gfx.pos.x = m.pos.x
+    m.marioObj.header.gfx.pos.y = m.pos.y
+    m.marioObj.header.gfx.pos.z = m.pos.z
+
+    if m.controller.buttonPressed & A_BUTTON ~= 0 or m.controller.buttonPressed & B_BUTTON ~= 0 then
+        gPlayerSyncTable[holder.playerIndex].heldWiggles = gPlayerSyncTable[holder.playerIndex].heldWiggles + 1
+    end
+
+    m.actionTimer = m.actionTimer + 1
 end
 
+-- Actions exclusive to a Hikaseru player
 hook_mario_action(ACT_BELLY_TRAMPOLINE, belly_trampoline_loop)
 hook_mario_action(ACT_BELLY_FLOP, { every_frame = belly_flop_loop, gravity = belly_flop_gravity }, INT_GROUND_POUND)
 hook_mario_action(ACT_ROLL, { every_frame = roll_loop, gravity = roll_gravity }, INT_GROUND_POUND)
 hook_mario_action(ACT_BELLY_THRUST, belly_thrust_loop, INT_KICK)
 hook_mario_action(ACT_BELLY_LONG_JUMP, { every_frame = belly_long_jump_loop, gravity = belly_long_jump_gravity }, INT_KICK)
 hook_mario_action(ACT_AIR_JUMP, { every_frame = air_jump_loop, gravity = air_jump_gravity })
+hook_mario_action(ACT_SPIT, spit_loop)
+hook_mario_action(ACT_AIR_SPIT, spit_loop)
 hook_mario_action(ACT_EATING, eating_loop)
+
+-- Action states other players can be put into by a Hikaseru player
 hook_mario_action(ACT_EATEN, act_eaten_loop)
 hook_mario_action(ACT_HELD, act_held_loop)
+hook_mario_action(ACT_SPAT_OUT, { every_frame = act_spat_out_loop, gravity = act_spat_out_gravity })

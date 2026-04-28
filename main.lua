@@ -22,11 +22,14 @@ SOUND_BOUNCE_1 = audio_sample_load('hika_boing_1.ogg')
 SOUND_BOUNCE_2 = audio_sample_load('hika_boing_2.ogg')
 SOUND_BOUNCE_3 = audio_sample_load('hika_boing_3.ogg')
 SOUND_STRAIN_1 = audio_sample_load('hika_strain_1.ogg')
+AIR_JUMP = "AIR_JUMP"
+BOUNCE = "BOUNCE"
+STRAIN = "STRAIN"
 
 SOUNDS_TABLE = {
-    ["AIR_JUMP"] = { SOUND_AIR_JUMP_1, SOUND_AIR_JUMP_2 },
-    ["BOUNCE"] = { SOUND_BOUNCE_1, SOUND_BOUNCE_2, SOUND_BOUNCE_3 },
-    ["STRAIN"] = { SOUND_STRAIN_1 },
+    [AIR_JUMP] = { SOUND_AIR_JUMP_1, SOUND_AIR_JUMP_2 },
+    [BOUNCE] = { SOUND_BOUNCE_1, SOUND_BOUNCE_2, SOUND_BOUNCE_3 },
+    [STRAIN] = { SOUND_STRAIN_1 },
 }
 
 -- Physics Constants
@@ -39,10 +42,15 @@ HIKA_AIR_JUMP_COUNT = 5 -- The number of air jumps Hikaseru can perform before t
 HIKA_DIVE_JUMP_VEL = 50.0 -- The height Hikaseru will jump when initiating a belly flop from the ground
 HIKA_ROLL_JUMP_VEL = 40.0 -- The maximum height Hikaseru can reach when jumping during a roll
 HIKA_OBJ_THROW_STRENGTH = 70.0 -- The speed objects travel when thrown by Hikaseru
+HIKA_OBJ_SPIT_STRENGTH = 140.0 -- The speed objects travel when spat out of Hikaseru's mouth
+HIKA_PLAYER_THROW_STRENGTH = 70.0 -- The speed players travel when thrown by Hikaseru
+HIKA_PLAYER_SPIT_STRENGTH = 140.0 -- The speed players travel when spat out of Hikaseru's mouth
 HIKA_BELLY_LONG_JUMP_PEAK_VEL = 60.0 -- The maximum speed Hikaseru can reach during a belly long jump
 HIKA_TRAMPOLINE_MAX_HEIGHT = 240.00 -- The maximum height a player can bounce to when bouncing off a Hikaseru in the trampoline state 
 HIKA_TRAMPOLINE_VEL_INFLUENCE = 0.5 -- The amount a player's downward velocity should affect their bounce height off of a Hikaseru in the trampoline state
 HIKA_TRAMPOLINE_BOUNCE_STRENGTH = 1.5 -- The multiplier for how much higher a player should bounce off of a Hikaseru in the trampoline state after other factors are calculated
+HIKA_HOLD_BREAKOUT_INPUTS = 8
+HIKA_EATEN_BREAKOUT_INPUTS = 30
 
 -- Actions where Hikaseru's gravity multiplier won't apply
 local IGNORE_GRAVITY_ACTIONS = {
@@ -53,7 +61,7 @@ local IGNORE_GRAVITY_ACTIONS = {
     ACT_SHOT_FROM_CANNON,
     ACT_TORNADO_TWIRLING,
     ACT_TWIRLING,
-    ACT_BELLY_LONG_JUMP
+    ACT_BELLY_LONG_JUMP,
 }
 
 -- Actions Hikaseru must be in to perform an air jump
@@ -64,6 +72,7 @@ local VALID_AIR_JUMP_ACTIONS = {
     ACT_TRIPLE_JUMP,
     ACT_SIDE_FLIP,
     ACT_BELLY_FLOP,
+    ACT_WALL_KICK_AIR,
 }
 
 -- Actions a player must be in to trampoline off Hikaseru's belly, along with their properties
@@ -113,6 +122,8 @@ local GRABBABLE_OBJECTS = {
     id_bhvGoomba,
     id_bhvKoopa,
     id_bhvMerryGoRoundBoo,
+    id_bhvMoneybag,
+    id_bhvMoneybagHidden,
     id_bhvMontyMole,
     id_bhvPiranhaPlant,
     id_bhvScuttlebug,
@@ -133,6 +144,14 @@ local function hikaseru_update(m)
     if m.action & ACT_FLAG_AIR == 0 then
         gPlayerSyncTable[0].airJumpCount = 0
         gPlayerSyncTable[0].bellyBounces = 0
+    end
+
+    if not gPlayerSyncTable[0].heldPlayerGlobalId then
+        gPlayerSyncTable[0].heldWiggles = 0
+    end
+
+    if not gPlayerSyncTable[0].eatenPlayerGlobalId then
+         gPlayerSyncTable[0].eatenWiggles = 0
     end
 
     -- Getting the trampoline behavior to work ended up requiring some workarounds. If the player loses their INTERACT_PLAYER interact type, we can override the default bounce behavior
@@ -164,9 +183,31 @@ local function hikaseru_update(m)
         set_mario_action(m, ACT_ROLL, 0)
     end
 
-    -- Begins the eating action
-    if m.heldObj ~= nil and m.controller.buttonDown & Z_TRIG ~= 0 then
-        set_mario_action(m, ACT_EATING, 0)
+    -- Allows other players to break out of Hikaseru's grab by mashing buttons
+    if gPlayerSyncTable[0].eatenPlayerGlobalId and gPlayerSyncTable[0].eatenWiggles >= HIKA_EATEN_BREAKOUT_INPUTS and (m.action ~= ACT_AIR_SPIT and m.action ~= ACT_THROWING) then
+        gPlayerSyncTable[0].eatenWiggles = 0
+        set_mario_action(m, ACT_AIR_SPIT, 0)
+        local eatenPlayerIndex = network_local_index_from_global(gPlayerSyncTable[0].eatenPlayerGlobalId)
+        if eatenPlayerIndex then
+            local victim = gMarioStates[eatenPlayerIndex]
+            set_mario_action(victim, ACT_SPAT_OUT, 0)
+        end
+    elseif gPlayerSyncTable[0].heldPlayerGlobalId and gPlayerSyncTable[0].heldWiggles >= HIKA_HOLD_BREAKOUT_INPUTS and m.action ~= ACT_EATING then
+        gPlayerSyncTable[0].heldWiggles = 0
+        if m.action & ACT_FLAG_AIR ~= 0 then
+            set_mario_action(m, ACT_AIR_THROW, 0)
+        else
+            set_mario_action(m, ACT_THROWING, 0)
+        end
+        local heldPlayerIndex = network_local_index_from_global(gPlayerSyncTable[0].heldPlayerGlobalId)
+        if heldPlayerIndex then
+            local victim = gMarioStates[heldPlayerIndex]
+            local angleToVictim = math.atan2(victim.pos.z - m.pos.z, victim.pos.x - m.pos.x)
+            victim.vel.x = math.cos(angleToVictim) * HIKA_PLAYER_THROW_STRENGTH
+            victim.vel.y = HIKA_AIR_JUMP_VEL
+            victim.vel.z = math.sin(angleToVictim) * HIKA_PLAYER_THROW_STRENGTH
+            set_mario_action(victim, ACT_THROWN_FORWARD, 0)
+        end
     end
 end
 
@@ -174,10 +215,45 @@ end
 ---@param m MarioState
 ---@param incomingAction integer
 local function before_set_hikaseru_action(m, incomingAction)
-    if m.playerIndex ~= 0 then return end
-
     if incomingAction == ACT_BACKFLIP then
         return ACT_BELLY_TRAMPOLINE
+    end
+
+    if (incomingAction == ACT_START_CROUCHING or incomingAction == ACT_CROUCH_SLIDE) and (gPlayerSyncTable[m.playerIndex].heldObjSyncId ~= nil or gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId ~= nil) and not gPlayerSyncTable[m.playerIndex].eatenObjSyncId and not gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId then
+        return ACT_EATING
+    end
+
+    if incomingAction == ACT_PUNCHING and m.controller.buttonDown & Z_TRIG ~= 0 then
+        return ACT_BELLY_THRUST
+    end
+
+    if (incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING) and (gPlayerSyncTable[m.playerIndex].eatenObjSyncId or gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId) then
+        return ACT_SPIT
+    end
+
+    if incomingAction == ACT_JUMP_KICK and (gPlayerSyncTable[m.playerIndex].eatenObjSyncId or gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId) then
+        return ACT_AIR_SPIT
+    end
+
+    if incomingAction == ACT_THROWING or incomingAction == ACT_AIR_THROW or incomingAction == ACT_AIR_THROW_LAND then
+        if gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId then
+            local o = m.heldObj
+            obj_mark_for_deletion(o)
+            local victimLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId)
+            local victim = gMarioStates[victimLocalIndex]
+
+            if victim then
+                local angleToVictim = math.atan2(victim.pos.z - m.pos.z, victim.pos.x - m.pos.x)
+                victim.vel.x = math.cos(angleToVictim) * HIKA_PLAYER_SPIT_STRENGTH
+                victim.vel.y = HIKA_AIR_JUMP_VEL
+                victim.vel.z = math.sin(angleToVictim) * HIKA_PLAYER_SPIT_STRENGTH
+                set_mario_action(victim, ACT_THROWN_FORWARD, 0)
+            end
+        end
+
+        log_to_console("LINE 254 SETTING heldPLAYERGlobalId TO nil")
+        gPlayerSyncTable[m.playerIndex].heldObjSyncId = nil
+        gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId = nil
     end
 
     if incomingAction == ACT_DIVE then
@@ -190,10 +266,6 @@ local function before_set_hikaseru_action(m, incomingAction)
 
     if incomingAction == ACT_SLIDE_KICK then
         return ACT_ROLL
-    end
-
-    if (incomingAction == ACT_PUNCHING or incomingAction == ACT_MOVE_PUNCHING) and m.controller.buttonDown & Z_TRIG ~= 0 then
-        return ACT_BELLY_THRUST
     end
 
     if incomingAction == ACT_LONG_JUMP then
@@ -239,6 +311,9 @@ local function on_attack_object(m, victim)
     m.slideVelX = 0
     m.slideVelZ = 0
     m.forwardVel = 0
+    m.vel.x = 0
+    m.vel.y = 0
+    m.vel.z = 0
 
     local modelId = obj_get_model_id_extended(victim)
     local heldObj = spawn_sync_object(id_bhvHeldObj, modelId, m.pos.x, m.pos.y, m.pos.z, function(o)
@@ -249,9 +324,12 @@ local function on_attack_object(m, victim)
         -- Defer coins spawning until the player throws and destroys the held object
         o.oNumLootCoins = victim.oNumLootCoins
         victim.oNumLootCoins = 0
+        o.globalPlayerIndex = network_global_index_from_local(m.playerIndex)
     end)
 
     m.heldObj = heldObj
+    gPlayerSyncTable[m.playerIndex].heldObjSyncId = heldObj.oSyncID
+
     obj_mark_for_deletion(victim)
     set_mario_action(m, ACT_HOLD_IDLE, 0)
 end
@@ -261,7 +339,33 @@ end
 ---@param victim MarioState
 ---@param interaction integer
 local function on_pvp_attack(attacker, victim, interaction)
-    if attacker.playerIndex ~= 0 then return end
+    -- If the attack isn't a punch, we don't need to do any special actions
+    if attacker.action ~= ACT_PUNCHING and attacker.action ~= ACT_MOVE_PUNCHING then
+        return
+    end
+
+    -- Zero out velocity to keep the player from sliding
+    attacker.slideVelX = 0
+    attacker.slideVelZ = 0
+    attacker.forwardVel = 0
+    attacker.vel.x = 0
+    attacker.vel.y = 0
+    attacker.vel.z = 0
+
+    local heldObj = spawn_sync_object(id_bhvBreakableBoxSmall, E_MODEL_NONE, attacker.pos.x, attacker.pos.y, attacker.pos.z, function(o) end)
+
+    attacker.heldObj = heldObj
+
+    log_to_console("LINE 361 SETTING heldPLAYERGlobalId TO  " .. tostring(network_global_index_from_local(victim.playerIndex)))
+    gPlayerSyncTable[attacker.playerIndex].heldPlayerGlobalId = network_global_index_from_local(victim.playerIndex)
+    gPlayerSyncTable[attacker.playerIndex].heldObjSyncId = nil
+
+    log_to_console("LINE 363 SETTING HOLDERGlobalId TO  " .. tostring(network_global_index_from_local(attacker.playerIndex)))
+    gPlayerSyncTable[victim.playerIndex].holderGlobalId = network_global_index_from_local(attacker.playerIndex)
+    gPlayerSyncTable[victim.playerIndex].eaterGlobalId = nil
+
+    set_mario_action(attacker, ACT_HOLD_IDLE, 0)
+    set_mario_action(victim, ACT_HELD, 0)
 end
 
 ---Prevent players from ground pounding Hikaseru while in the trampoline state
@@ -275,7 +379,7 @@ end
 ---@param m MarioState
 ---@param o Object
 local function on_interact(m, o)
-    if m.playerIndex ~= 0 or not TRAMPOLINE_ACTION_VALS[m.action] then return end
+    if m.playerIndex ~= 0 or m.vel.y >= 0 or not TRAMPOLINE_ACTION_VALS[m.action] then return end
     
     -- Get the Hikaseru player and confirm both players are in a valid state to allow for a bounce
     local mV = get_mario_state_from_object(o)
@@ -305,6 +409,32 @@ local function on_receive_packet(dataTable)
     end
 end
 
+---Resets all of Hikaseru's properties whenever he exits an area
+local function on_warp()
+    log_to_console("WARPING - EVERYTHING IS NIL")
+    gPlayerSyncTable[0].heldObjSyncId = nil
+    gPlayerSyncTable[0].heldPlayerGlobalId = nil
+    gPlayerSyncTable[0].heldWiggles = 0
+    gPlayerSyncTable[0].eatenObjSyncId = nil
+    gPlayerSyncTable[0].eatenPlayerGlobalId = nil
+    gPlayerSyncTable[0].eatenWiggles = 0
+
+    gPlayerSyncTable[0].airJumpCount = 0
+    gPlayerSyncTable[0].bellyBounces = 0
+    gPlayerSyncTable[0].isBounceable = false
+
+    gPlayerSyncTable[0].holderGlobalId = nil
+    gPlayerSyncTable[0].eaterGlobalId = nil
+end
+
+---Handles resetting a held player's state when thrown
+local function on_mario_update(m)
+    -- if m.action == ACT_THROWN_FORWARD or m.action == ACT_THROWN_BACKWARD then
+    --     gPlayerSyncTable[m.playerIndex].holderGlobalId = nil
+    --     gPlayerSyncTable[m.playerIndex].eaterGlobalId = nil
+    -- end
+end
+
 -- Moveset Hooks
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_MARIO_UPDATE, hikaseru_update)
 _G.charSelect.character_hook_moveset(CT_HIKASERU, HOOK_BEFORE_SET_MARIO_ACTION, before_set_hikaseru_action)
@@ -316,3 +446,5 @@ hook_event(HOOK_ON_PVP_ATTACK, on_pvp_attack)
 hook_event(HOOK_ALLOW_PVP_ATTACK, allow_pvp_attack)
 hook_event(HOOK_ON_INTERACT, on_interact)
 hook_event(HOOK_ON_PACKET_RECEIVE, on_receive_packet)
+hook_event(HOOK_ON_WARP, on_warp)
+hook_event(HOOK_MARIO_UPDATE, on_mario_update)
