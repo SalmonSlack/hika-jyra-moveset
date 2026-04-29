@@ -120,5 +120,24 @@ local function held_obj_loop(o)
     end
 end
 
+---
+---@param o Object
+local function invisible_held_obj_init(o)
+    o.oFlags = OBJ_FLAG_UPDATE_GFX_POS_AND_ANGLE | OBJ_FLAG_COMPUTE_DIST_TO_MARIO | OBJ_FLAG_HOLDABLE
+    o.oInteractType = INTERACT_GRABBABLE
+    o.oHeldState = HELD_HELD
+    cur_obj_become_intangible()
+end
+
+---
+---@param o Object
+local function invisible_held_obj_loop(o)
+    if o.oHeldState ~= HELD_HELD then
+        obj_mark_for_deletion(o)
+        return
+    end
+end
+
 id_bhvHeldObj = hook_behavior(nil, OBJ_LIST_DESTRUCTIVE, false, held_obj_init, held_obj_loop, 'bhvHikaHeldObj')
 id_bhvEatenObj = hook_behavior(nil, OBJ_LIST_GENACTOR, false, held_obj_init, held_obj_loop, 'bhvHikaEatenObj')
+id_bhvInvisibleHeldObj = hook_behavior(nil, OBJ_LIST_UNIMPORTANT, false, invisible_held_obj_init, invisible_held_obj_loop, 'bhvHikaInvisibleHeldObj')
