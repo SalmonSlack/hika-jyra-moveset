@@ -27,12 +27,14 @@ local function held_obj_init(o)
     o.oFaceAnglePitch = 0
     o.oFaceAngleYaw = 0x4000
     o.oFaceAngleRoll = 0x4000
+
+    network_init_object(o, true, { "oFlags", "oHeldState", "oBehParams" })
 end
 
----Handles the custom object holding interactions. Credits to wibblus and their Ario moveset for the bulk of the logic in this function
+---Handles the custom object holding interactions. Credits to wibblus and her Ario moveset for the bulk of the logic in this function
 ---@param o Object
 local function held_obj_loop(o)
-    local m = gMarioStates[network_local_index_from_global(o.heldByPlayerIndex)]
+    local m = gMarioStates[network_local_index_from_global(o.globalPlayerIndex)]
     if o.oHeldState == HELD_FREE then
         if o.oBehParams == 0 then
             -- Thrown from held state
@@ -89,6 +91,7 @@ local function held_obj_loop(o)
         cur_obj_disable_rendering()
         cur_obj_become_intangible()
     elseif o.oHeldState == HELD_THROWN then
+        log_to_console("THROWN")
         cur_obj_enable_rendering()
         cur_obj_become_tangible()
         cur_obj_set_pos_relative(m.marioObj, 30, 80, 100)
@@ -103,8 +106,6 @@ local function held_obj_loop(o)
         play_sound(SOUND_OBJ_EVIL_LAKITU_THROW, o.header.gfx.cameraToObject)
     elseif o.oHeldState == HELD_DROPPED then
         if o.oBehParams == 1 then cur_obj_disable_rendering() return end
-
-        local m = gMarioStates[network_local_index_from_global(o.globalPlayerIndex)]
 
         -- Getting Eaten
         if m.action == ACT_EATING then
@@ -139,5 +140,4 @@ local function invisible_held_obj_loop(o)
 end
 
 id_bhvHeldObj = hook_behavior(nil, OBJ_LIST_DESTRUCTIVE, false, held_obj_init, held_obj_loop, 'bhvHikaHeldObj')
-id_bhvEatenObj = hook_behavior(nil, OBJ_LIST_GENACTOR, false, held_obj_init, held_obj_loop, 'bhvHikaEatenObj')
 id_bhvInvisibleHeldObj = hook_behavior(nil, OBJ_LIST_UNIMPORTANT, false, invisible_held_obj_init, invisible_held_obj_loop, 'bhvHikaInvisibleHeldObj')

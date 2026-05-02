@@ -1,4 +1,4 @@
--- Credit to https://mods.sm64coopdx.com/members/wibblus.19/ and their Bowser Moveset mod for this entire file, including the animations
+-- Credit to https://mods.sm64coopdx.com/members/wibblus.19/ and their Bowser Moveset mod for the animations in this file
 
 local HIKA_PICKUP_OBJ = 'hika_pickup_obj'
 local HIKA_WALK_WITH_OBJ = 'hika_walk_with_obj'

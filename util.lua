@@ -12,8 +12,11 @@ end
 ---Shakes the camera and plays a sound effect to create a more impactful contact with the ground
 ---@param m MarioState
 function create_impact_effects(m)
-    set_camera_shake_from_hit(SHAKE_ENV_BOWSER_JUMP)
-    play_sound(SOUND_OBJ_BOWSER_WALK, m.marioObj.header.gfx.cameraToObject)
+    if has_hika_flags(m, _G.hikaMoveset.FLAG_HEAVIER_IMPACT) then
+        set_camera_shake_from_hit(SHAKE_ENV_BOWSER_JUMP)
+        play_sound(SOUND_OBJ_BOWSER_WALK, m.marioObj.header.gfx.cameraToObject)
+    end
+
     set_mario_particle_flags(m, PARTICLE_MIST_CIRCLE, 0)
     set_mario_particle_flags(m, PARTICLE_HORIZONTAL_STAR, 0)
 end
@@ -21,8 +24,11 @@ end
 ---Shakes the camera and plays a sound effect to create a more impactful contact with walls
 ---@param m MarioState
 function create_wall_impact_effects(m)
-    set_camera_shake_from_hit(SHAKE_ENV_BOWSER_JUMP)
-    play_sound(SOUND_OBJ_BOWSER_WALK, m.marioObj.header.gfx.cameraToObject)
+    if has_hika_flags(m, _G.hikaMoveset.FLAG_HEAVIER_IMPACT) then
+        set_camera_shake_from_hit(SHAKE_ENV_BOWSER_JUMP)
+        play_sound(SOUND_OBJ_BOWSER_WALK, m.marioObj.header.gfx.cameraToObject)
+    end
+
     set_mario_particle_flags(m, PARTICLE_VERTICAL_STAR, 0)
 end
 
@@ -74,4 +80,45 @@ function network_select_and_play_audio(pos, samplesKey, globalPlayerIndex)
         currCourseNum = networkPlayer.currCourseNum,
         currLevelNum = networkPlayer.currLevelNum
     })
+end
+
+---Checks if a Hikaseru player has the specified flags. Credit to wibblus and her Bowser Moveset for this function
+---@param m MarioState
+---@return boolean
+function has_hika_flags(m, flags)
+    return (gPlayerSyncTable[m.playerIndex].hikaState & flags ~= 0)
+end
+
+---Applies Hikaseru flags to the current player. hikaState will be 0 for all characters not using Hikaseru's moveset. Credit to wibblus and her Bowser Moveset for this function
+function apply_player_hika_flags()
+    local flags = gHikaFlagsTable[_G.charSelect.character_get_current_table().model]
+    if flags then
+        gPlayerSyncTable[0].hikaState = flags
+    else
+        gPlayerSyncTable[0].hikaState = 0
+    end
+end
+
+---Resets all sync table values to their defaults for a given player index
+---@param localIndex integer
+function reset_sync_table(localIndex)
+    apply_player_hika_flags()
+
+    gPlayerSyncTable[localIndex].heldObjSyncId = nil
+    gPlayerSyncTable[localIndex].heldPlayerGlobalId = nil
+    gPlayerSyncTable[localIndex].heldWiggles = 0
+
+    gPlayerSyncTable[localIndex].eatenObjSyncId = nil
+    gPlayerSyncTable[localIndex].eatenPlayerGlobalId = nil
+    gPlayerSyncTable[localIndex].eatenWiggles = 0
+
+    gPlayerSyncTable[localIndex].airJumpCount = 0
+    gPlayerSyncTable[localIndex].bellyBounces = 0
+    gPlayerSyncTable[localIndex].isBounceable = false
+
+    gPlayerSyncTable[localIndex].holderGlobalId = nil
+    gPlayerSyncTable[localIndex].eaterGlobalId = nil
+
+    cur_obj_become_tangible()
+    cur_obj_enable_rendering()
 end
