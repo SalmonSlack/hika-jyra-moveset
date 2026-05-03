@@ -1,5 +1,5 @@
 -- name: [CS] Hikaseru
--- description: Hikaseru v0.1 \nTraverse the Super Mario 64 universe with Hikaseru!\n\nCredits\n\nHikaseru Belongs to \\#4287f5\\MidnightLab\n\\#dcdcdc\\Moveset Developed by \\#cf9e3c\\Slack\n\\#dcdcdc\\
+-- description: Hikaseru v0.5 \nTraverse the Super Mario 64 universe with Hikaseru!\n\nCredits\n\nHikaseru Belongs to \\#4287f5\\MidnightLab\n\\#dcdcdc\\Moveset Developed by \\#cf9e3c\\Slack\n\\#dcdcdc\\
 
 ---@diagnostic disable: undefined-field
 if not _G.charSelectExists then return end
@@ -99,6 +99,8 @@ _G.hikaMoveset = {
 -- Helps us track which players are using which parts of the Hikaseru Moveset
 gHikaFlagsTable = {}
 
+IS_LOGGING_ENABLED = false
+
 ---Sets the moveset flags for a given Hikaseru player
 ---@param characterModelID ModelExtendedId|integer The CS Model ID for your character (e.g. E_MODEL_HIKASERU)
 ---@param flags integer Bitfield of combined moveset flags (e.g. FLAG_CAN_AIR_JUMP)
@@ -196,6 +198,8 @@ GRABBABLE_OBJECTS = {
     id_bhvSwoop,
 }
 
+gPlayerSyncTable[0].hikaState = 0
+
 ---Handles checks that need to occur on every frame
 ---@param m MarioState
 local function hikaseru_update(m)
@@ -242,7 +246,7 @@ local function hikaseru_update(m)
         local eatenPlayerIndex = network_local_index_from_global(gPlayerSyncTable[0].eatenPlayerGlobalId)
         local eatenPlayer = gMarioStates[eatenPlayerIndex]
 
-        if not eatenPlayer or gPlayerSyncTable[eatenPlayerIndex].eatenPlayerIndex ~= network_global_index_from_local(0) then
+        if not eatenPlayer then
             gPlayerSyncTable[0].eatenWiggles = 0
             gPlayerSyncTable[0].eatenPlayerGlobalId = nil
             return
@@ -258,13 +262,14 @@ local function hikaseru_update(m)
         local heldPlayerIndex = network_local_index_from_global(gPlayerSyncTable[0].heldPlayerGlobalId)
         local heldPlayer = gMarioStates[heldPlayerIndex]
 
-        if not heldPlayer or gPlayerSyncTable[heldPlayerIndex].heldPlayerIndex ~= network_global_index_from_local(0) then
+        if not heldPlayer then
             -- Destroy held object / references
             if gPlayerSyncTable[0].heldObjSyncId then
                 local heldObj = sync_object_get_object(gPlayerSyncTable[0].heldObjSyncId)
                 if heldObj then obj_mark_for_deletion(heldObj) end
                 gPlayerSyncTable[0].heldObjSyncId = nil
             end
+
             if m.heldObj then m.heldObj = nil end
 
             gPlayerSyncTable[0].heldWiggles = 0
@@ -276,7 +281,6 @@ local function hikaseru_update(m)
         -- Allows other players to break out of Hikaseru's hold by mashing buttons
         if gPlayerSyncTable[0].heldWiggles >= HIKA_HOLD_BREAKOUT_INPUTS then
             gPlayerSyncTable[0].heldWiggles = 0
-            gPlayerSyncTable[0].heldPlayerGlobalId = nil
             set_mario_action(m, m.action & ACT_FLAG_AIR ~= 0 and ACT_AIR_THROW or ACT_THROWING, 0)
         end
     end
@@ -300,6 +304,7 @@ local function before_set_hikaseru_action(m, incomingAction)
         return ACT_EATING
     end
 
+    -- Placeholder for the Belly Deflect mechanic
     -- if incomingAction == ACT_PUNCHING and m.controller.buttonDown & Z_TRIG ~= 0 then
     --     return ACT_BELLY_THRUST
     -- end
@@ -310,11 +315,6 @@ local function before_set_hikaseru_action(m, incomingAction)
 
     if incomingAction == ACT_JUMP_KICK and (gPlayerSyncTable[m.playerIndex].eatenObjSyncId or gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId) then
         return ACT_AIR_SPIT
-    end
-
-    if incomingAction == ACT_THROWING or incomingAction == ACT_AIR_THROW or incomingAction == ACT_AIR_THROW_LAND then
-        gPlayerSyncTable[m.playerIndex].heldObjSyncId = nil
-        gPlayerSyncTable[m.playerIndex].heldPlayerGlobalId = nil
     end
 
     if incomingAction == ACT_DIVE and has_hika_flags(m, _G.hikaMoveset.FLAG_CAN_BELLY_FLOP) then

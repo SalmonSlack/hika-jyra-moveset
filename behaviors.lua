@@ -28,7 +28,7 @@ local function held_obj_init(o)
     o.oFaceAngleYaw = 0x4000
     o.oFaceAngleRoll = 0x4000
 
-    network_init_object(o, true, { "oFlags", "oHeldState", "oBehParams" })
+    network_init_object(o, true, { "oFlags", "oHeldState", "oBehParams", "oIntangibleTimer" })
 end
 
 ---Handles the custom object holding interactions. Credits to wibblus and her Ario moveset for the bulk of the logic in this function
@@ -91,10 +91,9 @@ local function held_obj_loop(o)
         cur_obj_disable_rendering()
         cur_obj_become_intangible()
     elseif o.oHeldState == HELD_THROWN then
-        log_to_console("THROWN")
         cur_obj_enable_rendering()
         cur_obj_become_tangible()
-        cur_obj_set_pos_relative(m.marioObj, 30, 80, 100)
+        cur_obj_set_pos_relative(m.marioObj, 0, m.marioObj.hitboxHeight - 40, 100)
         o.oMoveAngleYaw = m.faceAngle.y
 
         o.oTimer = 0
@@ -110,7 +109,7 @@ local function held_obj_loop(o)
         -- Getting Eaten
         if m.action == ACT_EATING then
             cur_obj_enable_rendering()
-            cur_obj_set_pos_relative(m.marioObj, 30, 80, 100)
+            cur_obj_set_pos_relative(m.marioObj, 0, m.marioObj.hitboxHeight - 40, 100)
         elseif gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId or (gPlayerSyncTable[m.playerIndex].eatenObjSyncId and gPlayerSyncTable[m.playerIndex].eatenObjSyncId ~= o.oSyncID) then
             -- Dropping held object while another object is in Hikaseru's mouth
             cur_obj_enable_rendering()

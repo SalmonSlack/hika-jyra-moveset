@@ -368,9 +368,8 @@ end
 ---Eating is the state where the player puts another player or object into their mouth
 ---@param m MarioState
 local function eating_loop(m)
-    log_to_console("EATING_LOOP - Action Timer: " .. m.actionTimer)
     if m.actionTimer < 29 and (not gPlayerSyncTable[m.playerIndex].heldObjSyncId or gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId or gPlayerSyncTable[m.playerIndex].eatenObjSyncId) then
-        log_to_console("No held object or already has an eaten player/object, exiting ACT_EATING")
+        log("eating_loop - eater is missing necessary syncTable values, exiting eating_loop")
         return set_mario_action(m, ACT_IDLE, 0)
     end
 
@@ -431,7 +430,7 @@ end
 local function spit_loop(m)
     -- Reset all held / eaten attributes and set the object / player into their spat out states
     if m.actionTimer == 0 then
-        log_to_console("SPIT_LOOP - Spitting Out Player")
+        log("spit_loop - Spitting Out Object / Player")
         smlua_anim_util_set_animation(m.marioObj, CHAR_ANIM_HIKA_SPIT)
         set_anim_to_frame(m, 0)
         if m.action & ACT_FLAG_AIR == 0 then
@@ -456,7 +455,6 @@ local function spit_loop(m)
 
     -- This is the part of the animation we want to re-render the object / player
     if m.actionTimer == 5 then
-        log_to_console("EATEN PLAYER GLOBAL ID: " .. tostring(gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId))
         if gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId then
             local eatenPlayerLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].eatenPlayerGlobalId)
             if eatenPlayerLocalIndex then
@@ -471,6 +469,7 @@ local function spit_loop(m)
              local eatenObj = sync_object_get_object(gPlayerSyncTable[m.playerIndex].eatenObjSyncId)
              if eatenObj then
                 eatenObj.oHeldState = HELD_THROWN
+                network_send_object(eatenObj, true)
              end
         end
 
@@ -502,12 +501,12 @@ end
 ---@param m MarioState
 local function act_eaten_loop(m)
     if not gPlayerSyncTable[m.playerIndex].eaterGlobalId then
-        log_to_console("No eaterGlobalId found, exiting ACT_EATEN")
+        log("act_eaten_loop - eaterGlobalId not found, exiting act_eaten_loop")
         return set_mario_action(m, ACT_BACKWARD_AIR_KB, 0)
     end
 
     if m.actionTimer == 0 then
-        log_to_console("ACT_EATEN - Eaten Player Global Index: " .. tostring(network_global_index_from_local(m.playerIndex)))
+        log("act_eaten_loop - Eaten Player Global Index: " .. tostring(network_global_index_from_local(m.playerIndex)))
         cur_obj_disable_rendering()
         cur_obj_become_intangible()
     end
@@ -541,6 +540,7 @@ end
 ---@param m MarioState
 local function act_spat_out_loop(m)
     if m.actionTimer == 0 then
+        cur_obj_become_intangible()
         cur_obj_enable_rendering()
         set_mario_animation(m, CHAR_ANIM_BACKWARD_AIR_KB)
     elseif m.actionTimer == 5 then
@@ -561,10 +561,6 @@ local function act_spat_out_loop(m)
 
     update_air_without_turn(m)
     local step = perform_air_step(m, 0)
-
-    m.faceAngle.x = m.faceAngle.x + 0xF00
-    m.marioObj.header.gfx.angle.y = m.marioObj.header.gfx.angle.y + 0x800
-    m.faceAngle.z = m.faceAngle.z + 0xF00
 
     if step == AIR_STEP_LANDED then
         cur_obj_become_tangible()
@@ -591,7 +587,7 @@ end
 ---@param m MarioState
 local function act_held_loop(m)
     if not gPlayerSyncTable[m.playerIndex].holderGlobalId then
-        log_to_console("No holderGlobalId found, exiting ACT_HELD")
+        log("act_held_loop - No holderGlobalId found, exiting act_held_loop")
         cur_obj_become_tangible()
         return set_mario_action(m, ACT_FREEFALL, 0)
     end
@@ -604,12 +600,25 @@ local function act_held_loop(m)
     local holderLocalIndex = network_local_index_from_global(gPlayerSyncTable[m.playerIndex].holderGlobalId)
     local holder = gMarioStates[holderLocalIndex]
 
-    -- If we can't figure out the player's position, cancel out of the held state
-    if not holder or (not holder.heldObj and holder.action ~= ACT_EATING) then
-        log_to_console("Holder not found or held object missing, exiting ACT_HELD")
+    -- If we can't find the holder or the holder doesn't have a held object, cancel the act_held loop
+    -- Not a huge fan of the conditionals here, but it's the cases needed to keep this from running when we don't want it to
+    if not holder then
+        log("act_held_loop - Holder not found, exiting act_held_loop")
         gPlayerSyncTable[m.playerIndex].holderGlobalId = nil
         cur_obj_become_tangible()
         return set_mario_action(m, ACT_FREEFALL, 0)
+    end
+
+    if not holder.heldObj and holder.action ~= ACT_EATING and gPlayerSyncTable[holderLocalIndex].heldObjSyncId then
+        local heldObj = sync_object_get_object(gPlayerSyncTable[holderLocalIndex].heldObjSyncId)
+        if heldObj then
+            holder.heldObj = heldObj
+        else
+            log("act_held_loop - emergency fallback, exiting act_held_loop")
+            gPlayerSyncTable[m.playerIndex].holderGlobalId = nil
+            cur_obj_become_tangible()
+            return set_mario_action(m, ACT_FREEFALL, 0)
+        end
     end
 
     local heldObjPos = holder.marioBodyState.heldObjLastPosition
@@ -627,7 +636,7 @@ local function act_held_loop(m)
     else
         -- Shift the player's model towards the front of the holder instead to appear like they're being eaten
         m.marioObj.header.gfx.pos.x = holder.pos.x + sins(holder.faceAngle.y) * (m.marioObj.hitboxRadius * 2.0)
-        m.marioObj.header.gfx.pos.y = holder.pos.y + (m.marioObj.hitboxHeight / 2)
+        m.marioObj.header.gfx.pos.y = holder.pos.y + (m.marioObj.hitboxHeight - 40.0)
         m.marioObj.header.gfx.pos.z = holder.pos.z + coss(holder.faceAngle.y) * (m.marioObj.hitboxRadius * 2.0)
         m.faceAngle.y = holder.faceAngle.y + 0x8000
         m.marioObj.header.gfx.angle.y = m.faceAngle.y

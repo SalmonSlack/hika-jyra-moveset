@@ -102,8 +102,7 @@ end
 ---Resets all sync table values to their defaults for a given player index
 ---@param localIndex integer
 function reset_sync_table(localIndex)
-    apply_player_hika_flags()
-
+    log("reset_sync_table - Resetting sync table for local index: " .. tostring(localIndex))
     gPlayerSyncTable[localIndex].heldObjSyncId = nil
     gPlayerSyncTable[localIndex].heldPlayerGlobalId = nil
     gPlayerSyncTable[localIndex].heldWiggles = 0
@@ -119,6 +118,13 @@ function reset_sync_table(localIndex)
     gPlayerSyncTable[localIndex].holderGlobalId = nil
     gPlayerSyncTable[localIndex].eaterGlobalId = nil
 
+    apply_player_hika_flags()
     cur_obj_become_tangible()
     cur_obj_enable_rendering()
+end
+
+---Logs to the console only if IS_LOGGING_ENABLED is toggled on
+---@param message string
+function log(message)
+    if IS_LOGGING_ENABLED then log_to_console(message) end
 end
